@@ -62,7 +62,7 @@ pipeline {
             when { expression { !params.DESTROY_INFRA } }
             steps {
                 withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-                    withEnv(["JAVA_HOME=${JDK8}", "PATH+JDK=${JDK8}/bin"]) {
+                    withEnv(["JAVA_HOME=/opt/java/openjdk", "PATH+JDK=/opt/java/openjdk/bin"]) {
                         sh '''mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
                               -Dsonar.projectKey=docker-spring-boot \
                               -Dsonar.host.url=http://sonarqube:9000 \
