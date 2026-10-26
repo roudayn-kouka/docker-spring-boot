@@ -71,7 +71,7 @@ resource "aws_security_group" "eks_worker_sg" {
 resource "aws_eks_cluster" "my_cluster" {
   name     = var.cluster_name
   role_arn = var.role_arn
-  version  = "1.30"
+  version  = "1.35"
 
   vpc_config {
     subnet_ids         = var.subnet_ids
