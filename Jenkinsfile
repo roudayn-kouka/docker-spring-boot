@@ -3,7 +3,7 @@ pipeline {
 
     parameters {
         booleanParam(name: 'RUN_TERRAFORM', defaultValue: true,
-                     description: 'Creer / mettre a jour le cluster EKS avec Terraform')
+                     description: 'Creer / mettre a jour le cluster EKS (decochez si le cluster existe deja)')
         booleanParam(name: 'DESTROY_INFRA', defaultValue: false,
                      description: 'Detruire le cluster EKS (terraform destroy) - decochez RUN_TERRAFORM')
     }
@@ -15,12 +15,22 @@ pipeline {
         JDK8               = '/opt/jdk8'
         AWS_DEFAULT_REGION = 'us-east-1'
         CLUSTER_NAME       = 'mykubernetes'
+        terraformDir       = 'terraform'
+        // Secret file au format ~/.aws/credentials (utilise par aws, terraform et kubectl)
+        AWS_SHARED_CREDENTIALS_FILE = credentials('awsCredentials')
     }
 
     stages {
         stage('CHECKOUT GIT') {
             steps {
                 git branch: 'main', url: 'https://github.com/roudayn-kouka/docker-spring-boot.git'
+            }
+        }
+
+        stage('Test AWS Credentials') {
+            steps {
+                sh 'aws sts get-caller-identity'
+                echo 'AWS Credentials File Loaded'
             }
         }
 
@@ -100,15 +110,10 @@ pipeline {
             }
         }
 
-        stage('TERRAFORM APPLY (EKS)') {
+        stage('SETUP TERRAFORM') {
             when { expression { params.RUN_TERRAFORM && !params.DESTROY_INFRA } }
-            environment {
-                AWS_ACCESS_KEY_ID     = credentials('aws-access-key-id')
-                AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
-                AWS_SESSION_TOKEN     = credentials('aws-session-token')
-            }
             steps {
-                dir('terraform') {
+                dir(terraformDir) {
                     sh 'terraform init -input=false'
                     sh 'terraform validate'
                     sh 'terraform apply -auto-approve -input=false'
@@ -116,16 +121,17 @@ pipeline {
             }
         }
 
-        stage('DEPLOY TO EKS') {
+        stage('UPDATE KUBECONFIG') {
             when { expression { !params.DESTROY_INFRA } }
-            environment {
-                AWS_ACCESS_KEY_ID     = credentials('aws-access-key-id')
-                AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
-                AWS_SESSION_TOKEN     = credentials('aws-session-token')
+            steps {
+                sh 'aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME'
             }
+        }
+
+        stage('DEPLOY TO AWS KUBERNETES') {
+            when { expression { !params.DESTROY_INFRA } }
             steps {
                 sh 'aws sts get-caller-identity'
-                sh 'aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME'
                 sh "sed 's#image: .*#image: ${registry}:${BUILD_NUMBER}#' deployment.yaml | kubectl apply -f -"
                 sh 'kubectl apply -f service.yaml'
                 sh 'kubectl rollout status deployment/my-spring-boot-app --timeout=300s'
@@ -134,15 +140,10 @@ pipeline {
             }
         }
 
-        stage('TERRAFORM DESTROY (EKS)') {
+        stage('TEARDOWN TERRAFORM') {
             when { expression { params.DESTROY_INFRA } }
-            environment {
-                AWS_ACCESS_KEY_ID     = credentials('aws-access-key-id')
-                AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
-                AWS_SESSION_TOKEN     = credentials('aws-session-token')
-            }
             steps {
-                dir('terraform') {
+                dir(terraformDir) {
                     sh 'terraform init -input=false'
                     sh 'terraform destroy -auto-approve -input=false'
                 }
